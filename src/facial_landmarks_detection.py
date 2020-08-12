@@ -1,12 +1,4 @@
-'''
-This is a sample class for a model. You may choose to use it as-is or make any changes to it.
-This has been provided just to give you an idea of how to structure your model class.
-'''
 from openvino.inference_engine import IENetwork, IECore
-import pprint
-import cv2
-import logging
-import time
 import numpy as np
 import argparse
 import tensorflow as tf
@@ -38,6 +30,8 @@ class InputFeeder:
         else:
             while self.cap.isOpened():
                 _, frame = self.cap.read()
+                if args.input_type == 'cam':
+                    frame = cv2.flip(frame, 1)
                 return frame
 
     def close(self):
@@ -75,15 +69,15 @@ class FaceDetection:
         input_name, input_shape, output_name, output_shape = self.check_model()
         input_dict = {input_name: processed_image}
         start = time.time()
-        infer = self.net.start_async(request_id=0, inputs=input_dict)
+        self.net.start_async(request_id=0, inputs=input_dict)
         self.count += 1
         if self.net.requests[0].wait(-1) == 0:
             results = self.net.requests[0].outputs[output_name]
             logger.info('Face Detection Model Inference speed is: {:.3f} fps'.format(1 / (time.time() - start)))
 
-        return results
+            return results
 
-        raise NotImplementedError
+            raise NotImplementedError
 
     def check_model(self):
         input_name = next(iter(self.net.inputs))
@@ -100,6 +94,7 @@ class FaceDetection:
         image = cv2.resize(image, (input_shape[3], input_shape[2]), interpolation=cv2.INTER_AREA)
         image = image.transpose((2, 0, 1))
         image = image.reshape(1, *image.shape)
+
 
         return image
 
@@ -126,24 +121,27 @@ class FaceDetection:
 
 
 def mask_detection(image, new_model):
-    image = cv2.resize(image, (300, 300), interpolation=cv2.INTER_AREA)
-    image = np.array(image).reshape(-1, 300, 300, 3)
+    image = cv2.resize(image, (250, 250), interpolation=cv2.INTER_AREA)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    image = np.array(image).reshape(-1, 250, 250, 1)
     start = time.time()
     results = new_model.predict([image])
     logger.info('Mask Detection Model Inference speed is: {:.3f} fps'.format(1 / (time.time() - start)))
-    if results[0] == 1:
-        text = 'No mask'
     if results[0] == 0:
         text = 'Mask Detected'
+    else:
+        text = 'No mask'
+
     return text
 
 
 def main(args):
-    fd = FaceDetection('models/intel/face-detection-adas-binary-0001/FP32-INT1/face-detection-adas-binary-0001', 'CPU')
+    fd = FaceDetection(args.model_path, 'CPU')
     feed = InputFeeder(input_type=args.input_type, input_file=args.input_file)
     fd.load_model()
     feed.load_data()
-    new_model = tf.keras.models.load_model('/home/sammie/Jupyter_notebook/Mask_detection/mask_detection.model')
+    new_model = tf.keras.models.load_model('/home/sammie/PycharmProjects/Mask_detection_training/2-cnn-0-dense-128-'
+                                           'nodes-mask-detection1596924473.334316.model')
     logger.info("Mask detection model loaded...")
 
     if args.input_type == 'image':
@@ -152,12 +150,12 @@ def main(args):
             image, crop, coords = fd.preprocess_output(batch)
             if len(crop.shape) == 3:
                 result = mask_detection(crop, new_model)
-                if result == 'No mask':
-                    color = (0, 0, 255)
-                else:
-                    color = (0, 255, 0)
-                image = cv2.putText(image, result, (100, 30), cv2.FONT_ITALIC, 1.0, color, 1)
-                cv2.imwrite('Results.png', image)
+            if result == 'No mask':
+                color = (0, 0, 255)
+            else:
+                color = (0, 255, 0)
+            image = cv2.putText(image, result, (100, 30), cv2.FONT_ITALIC, 1.0, color, 1)
+            cv2.imwrite('Results.png', image)
 
         except TypeError:
             logger.info('No face detected in frame')
@@ -169,16 +167,15 @@ def main(args):
                 crop, image, coords = fd.preprocess_output(batch)
                 if len(crop.shape) == 3:
                     result = mask_detection(crop, new_model)
-
-                if result == 'No mask':
-                    color = (0, 0, 255)
-                else:
-                    color = (0, 255, 0)
-                image = cv2.putText(image, result, (coords[0], coords[1]), cv2.FONT_ITALIC, 0.5, color, 1)
-                cv2.imshow('Results', image)
-                key = cv2.waitKey(1)
-                if key == ord('q'):
-                    break
+                    if result == 'No mask':
+                        color = (0, 0, 255)
+                    else:
+                        color = (0, 255, 0)
+                    image = cv2.putText(image, result, (coords[0], coords[1]), cv2.FONT_ITALIC, 0.7, color, 2)
+                    cv2.imshow('Results', image)
+                    key = cv2.waitKey(1)
+                    if key == ord('q'):
+                        break
 
             except TypeError:
                 logger.info("No face detected!!!")
